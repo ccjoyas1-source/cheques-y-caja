@@ -64,6 +64,7 @@ export interface Transfer {
   notes?: string;
   transferredBy: UserRole;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface CheckFiltersState {

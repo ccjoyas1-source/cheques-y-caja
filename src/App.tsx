@@ -109,6 +109,7 @@ export default function App() {
   const [isCheckModalOpen, setIsCheckModalOpen] = useState(false);
   const [editingCheck, setEditingCheck] = useState<Check | null>(null);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [editingTransfer, setEditingTransfer] = useState<Transfer | null>(null);
   const [bouncingCheck, setBouncingCheck] = useState<Check | null>(null);
   const [detailCheck, setDetailCheck] = useState<Check | null>(null);
   const [isClientsModalOpen, setIsClientsModalOpen] = useState(false);
@@ -475,13 +476,31 @@ export default function App() {
   };
 
   // Transfers / Expenses
-  const handleSaveTransfer = (transferData: Omit<Transfer, 'id' | 'createdAt'>) => {
-    const newTransfer: Transfer = {
-      ...transferData,
-      id: `trf-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    setTransfers((prev) => [newTransfer, ...prev]);
+  const handleSaveTransfer = (
+    transferData: Omit<Transfer, 'id' | 'createdAt'>,
+    transferId?: string
+  ) => {
+    if (transferId) {
+      setTransfers((prev) =>
+        prev.map((t) =>
+          t.id === transferId
+            ? {
+                ...t,
+                ...transferData,
+                updatedAt: new Date().toISOString(),
+              }
+            : t
+        )
+      );
+    } else {
+      const newTransfer: Transfer = {
+        ...transferData,
+        id: `trf-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      };
+      setTransfers((prev) => [newTransfer, ...prev]);
+    }
+    setEditingTransfer(null);
   };
 
   const handleDeleteTransfer = (id: string) => {
@@ -573,7 +592,10 @@ export default function App() {
           setEditingCheck(null);
           setIsCheckModalOpen(true);
         }}
-        onOpenTransferModal={() => setIsTransferModalOpen(true)}
+        onOpenTransferModal={() => {
+          setEditingTransfer(null);
+          setIsTransferModalOpen(true);
+        }}
         onOpenCashIncomeModal={() => setIsCashIncomeModalOpen(true)}
         onOpenInitialBalanceModal={() => setIsInitialBalanceModalOpen(true)}
         onOpenClientsModal={() => setIsClientsModalOpen(true)}
@@ -655,7 +677,10 @@ export default function App() {
               dueThisWeekAmount={dueThisWeekAmount}
               dueThisWeekCount={dueThisWeekChecks.length}
               bouncedCount={bouncedChecks.length}
-              onOpenTransferModal={() => setIsTransferModalOpen(true)}
+              onOpenTransferModal={() => {
+                setEditingTransfer(null);
+                setIsTransferModalOpen(true);
+              }}
               onOpenCashIncomeModal={() => setIsCashIncomeModalOpen(true)}
               onOpenInitialBalanceModal={() => setIsInitialBalanceModalOpen(true)}
               onFilterDueThisWeek={() => handleFilterChange({ status: 'due_this_week' })}
@@ -706,9 +731,16 @@ export default function App() {
             totalCashIncomes={totalCashIncomes}
             totalTransferred={totalTransferred}
             totalBounced={totalBounced}
-            onOpenTransferModal={() => setIsTransferModalOpen(true)}
+            onOpenTransferModal={() => {
+              setEditingTransfer(null);
+              setIsTransferModalOpen(true);
+            }}
             onOpenCashIncomeModal={() => setIsCashIncomeModalOpen(true)}
             onOpenInitialBalanceModal={() => setIsInitialBalanceModalOpen(true)}
+            onEditTransfer={(transfer) => {
+              setEditingTransfer(transfer);
+              setIsTransferModalOpen(true);
+            }}
             onDeleteTransfer={handleDeleteTransfer}
             onDeleteCashIncome={handleDeleteCashIncome}
             currentUser={currentUser}
@@ -778,10 +810,14 @@ export default function App() {
 
       <TransferModal
         isOpen={isTransferModalOpen}
-        onClose={() => setIsTransferModalOpen(false)}
+        onClose={() => {
+          setIsTransferModalOpen(false);
+          setEditingTransfer(null);
+        }}
         availableCash={availableCash}
         currentUser={currentUser}
         onSaveTransfer={handleSaveTransfer}
+        editingTransfer={editingTransfer}
       />
 
       <BounceCheckModal

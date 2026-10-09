@@ -2,14 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Transfer, UserRole } from '../types';
 import { formatCurrency, getTodayDateString } from '../utils/dateUtils';
 import { COMMON_DESTINATION_ACCOUNTS } from '../utils/initialData';
-import { X, ArrowRightLeft, DollarSign, Building2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, ArrowRightLeft, DollarSign, Building2, CheckCircle2, AlertCircle, Edit3 } from 'lucide-react';
 
 interface TransferModalProps {
   isOpen: boolean;
   onClose: () => void;
   availableCash: number;
   currentUser: UserRole;
-  onSaveTransfer: (transfer: Omit<Transfer, 'id' | 'createdAt'>) => void;
+  onSaveTransfer: (transfer: Omit<Transfer, 'id' | 'createdAt'>, transferId?: string) => void;
+  editingTransfer?: Transfer | null;
 }
 
 export const TransferModal: React.FC<TransferModalProps> = ({
@@ -18,6 +19,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
   availableCash,
   currentUser,
   onSaveTransfer,
+  editingTransfer,
 }) => {
   const [amount, setAmount] = useState<string>('');
   const [destinationAccount, setDestinationAccount] = useState<string>(COMMON_DESTINATION_ACCOUNTS[0]);
@@ -30,21 +32,39 @@ export const TransferModal: React.FC<TransferModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setAmount('');
-      setDestinationAccount(COMMON_DESTINATION_ACCOUNTS[0]);
-      setCustomDestination('');
-      setReferenceNumber(`TRF-${Math.floor(10000 + Math.random() * 90000)}`);
-      setNotes('');
-      setTransferredBy(currentUser);
-      setDate(getTodayDateString());
       setError('');
+      if (editingTransfer) {
+        setAmount(editingTransfer.amount.toString());
+        if (COMMON_DESTINATION_ACCOUNTS.includes(editingTransfer.destinationAccount)) {
+          setDestinationAccount(editingTransfer.destinationAccount);
+          setCustomDestination('');
+        } else {
+          setDestinationAccount('OTRO');
+          setCustomDestination(editingTransfer.destinationAccount);
+        }
+        setReferenceNumber(editingTransfer.referenceNumber);
+        setNotes(editingTransfer.notes || '');
+        setTransferredBy(editingTransfer.transferredBy);
+        setDate(editingTransfer.date);
+      } else {
+        setAmount('');
+        setDestinationAccount(COMMON_DESTINATION_ACCOUNTS[0]);
+        setCustomDestination('');
+        setReferenceNumber(`TRF-${Math.floor(10000 + Math.random() * 90000)}`);
+        setNotes('');
+        setTransferredBy(currentUser);
+        setDate(getTodayDateString());
+      }
     }
-  }, [isOpen, currentUser]);
+  }, [isOpen, editingTransfer, currentUser]);
 
   if (!isOpen) return null;
 
   const numAmount = parseFloat(amount) || 0;
-  const remainingAfterTransfer = Math.max(0, availableCash - numAmount);
+  // If editing, the original amount was already deducted from available cash, so we give credit back for validation
+  const originalAmount = editingTransfer ? editingTransfer.amount : 0;
+  const maxAllowedAmount = availableCash + originalAmount;
+  const remainingAfterTransfer = Math.max(0, maxAllowedAmount - numAmount);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,14 +75,18 @@ export const TransferModal: React.FC<TransferModalProps> = ({
       return;
     }
 
-    if (numAmount > availableCash) {
-      setError(`No dispones de suficiente saldo en efectivo. El saldo disponible es de ${formatCurrency(availableCash)}.`);
+    if (numAmount > maxAllowedAmount) {
+      setError(
+        `No dispones de suficiente saldo en efectivo. El monto máximo disponible para este movimiento es de ${formatCurrency(
+          maxAllowedAmount
+        )}.`
+      );
       return;
     }
 
     const finalAccount = destinationAccount === 'OTRO' ? customDestination.trim() : destinationAccount;
     if (!finalAccount) {
-      setError('Por favor especifica la cuenta de destino.');
+      setError('Por favor especifica la cuenta de destino o motivo de egreso.');
       return;
     }
 
@@ -71,37 +95,44 @@ export const TransferModal: React.FC<TransferModalProps> = ({
       return;
     }
 
-    onSaveTransfer({
-      amount: numAmount,
-      destinationAccount: finalAccount,
-      referenceNumber: referenceNumber.trim(),
-      notes: notes.trim(),
-      transferredBy,
-      date,
-    });
+    onSaveTransfer(
+      {
+        amount: numAmount,
+        destinationAccount: finalAccount,
+        referenceNumber: referenceNumber.trim(),
+        notes: notes.trim(),
+        transferredBy,
+        date,
+      },
+      editingTransfer ? editingTransfer.id : undefined
+    );
 
     onClose();
   };
 
+  const isEditing = Boolean(editingTransfer);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div 
-        className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-lg overflow-hidden"
+        className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-700">
-              <ArrowRightLeft className="w-5 h-5" />
+            <div className={`p-2 rounded-lg ${isEditing ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+              {isEditing ? <Edit3 className="w-5 h-5" /> : <ArrowRightLeft className="w-5 h-5" />}
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                Transferir Fondos Efectivizados
+                {isEditing ? 'Editar Egreso / Transferencia' : 'Nuevo Egreso / Transferencia'}
               </h3>
               <p className="text-xs text-slate-500">
-                Mover dinero cobrado hacia otra cuenta bancaria de destino
+                {isEditing
+                  ? `Modificando comprobante ${editingTransfer?.referenceNumber}`
+                  : 'Registrar salida de efectivo o transferencia bancaria'}
               </p>
             </div>
           </div>
@@ -127,15 +158,20 @@ export const TransferModal: React.FC<TransferModalProps> = ({
           <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
             <div>
               <span className="text-emerald-800 font-medium block">
-                Saldo Disponible en Efectivo:
+                {isEditing ? 'Saldo disponible + Monto actual:' : 'Saldo Disponible en Efectivo:'}
               </span>
               <span className="text-lg font-bold text-emerald-950 tabular-nums">
-                {formatCurrency(availableCash)}
+                {formatCurrency(maxAllowedAmount)}
               </span>
+              {isEditing && (
+                <span className="text-[10px] text-emerald-700 block mt-0.5">
+                  (Incluye ${formatCurrency(originalAmount)} del egreso en edición)
+                </span>
+              )}
             </div>
-            {numAmount > 0 && numAmount <= availableCash && (
+            {numAmount > 0 && numAmount <= maxAllowedAmount && (
               <div className="text-right">
-                <span className="text-slate-500 block">Saldo restante:</span>
+                <span className="text-slate-500 block">Saldo resultante en caja:</span>
                 <span className="text-sm font-semibold text-slate-700 tabular-nums">
                   {formatCurrency(remainingAfterTransfer)}
                 </span>
@@ -148,16 +184,16 @@ export const TransferModal: React.FC<TransferModalProps> = ({
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
                 <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-                <span>Monto a Transferir (USD)</span>
+                <span>Monto a Transferir / Egresar (USD)</span>
                 <span className="text-rose-500">*</span>
               </label>
               <button
                 type="button"
-                onClick={() => setAmount(availableCash.toString())}
-                disabled={availableCash <= 0}
+                onClick={() => setAmount(maxAllowedAmount.toString())}
+                disabled={maxAllowedAmount <= 0}
                 className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 underline disabled:opacity-40 cursor-pointer"
               >
-                Transferir todo el saldo ({formatCurrency(availableCash)})
+                Asignar todo el disponible ({formatCurrency(maxAllowedAmount)})
               </button>
             </div>
 
@@ -169,7 +205,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                 type="number"
                 step="0.01"
                 min="0.01"
-                max={availableCash}
+                max={maxAllowedAmount}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
@@ -183,7 +219,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
               <Building2 className="w-3.5 h-3.5 text-slate-400" />
-              <span>Cuenta Bancaria / Destino</span>
+              <span>Cuenta Bancaria / Destino / Motivo de Salida</span>
               <span className="text-rose-500">*</span>
             </label>
             <select
@@ -196,7 +232,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                   {acc}
                 </option>
               ))}
-              <option value="OTRO">Otra cuenta (escribir detalle)</option>
+              <option value="OTRO">Otro destino / Gasto (escribir detalle)</option>
             </select>
 
             {destinationAccount === 'OTRO' && (
@@ -204,9 +240,10 @@ export const TransferModal: React.FC<TransferModalProps> = ({
                 type="text"
                 value={customDestination}
                 onChange={(e) => setCustomDestination(e.target.value)}
-                placeholder="Ej. Banco Bolivariano - Cta Cte #10928392"
+                placeholder="Ej. Banco Bolivariano - Cta Cte #10928392 o Pago de Arriendo"
                 className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
                 autoFocus
+                required
               />
             )}
           </div>
@@ -229,7 +266,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
 
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Fecha de Transferencia
+                Fecha del Movimiento
               </label>
               <input
                 type="date"
@@ -241,7 +278,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
             </div>
           </div>
 
-          {/* Authorized by */}
+          {/* Authorized by & Notes */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1">
@@ -259,7 +296,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
 
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Motivo / Nota Opcional
+                Concepto / Nota Opcional
               </label>
               <input
                 type="text"
@@ -282,15 +319,15 @@ export const TransferModal: React.FC<TransferModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={availableCash <= 0}
+              disabled={maxAllowedAmount <= 0}
               className={`px-5 py-2 text-xs font-semibold text-white rounded-lg shadow-xs transition-colors inline-flex items-center gap-1.5 ${
-                availableCash > 0
+                maxAllowedAmount > 0
                   ? 'bg-slate-900 hover:bg-slate-800 cursor-pointer'
                   : 'bg-slate-400 cursor-not-allowed'
               }`}
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Confirmar Transferencia</span>
+              <span>{isEditing ? 'Guardar Cambios' : 'Confirmar Egreso / Transferencia'}</span>
             </button>
           </div>
 

@@ -38,9 +38,11 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => setActiveTab('dashboard')}
               className="text-left group flex items-center gap-2.5 focus:outline-none cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-lg bg-slate-900 text-amber-400 flex items-center justify-center font-bold text-lg shadow-xs group-hover:bg-slate-800 transition-colors">
-                $
-              </div>
+              <img 
+                src="/logo.svg" 
+                alt="ChequesPro Logo" 
+                className="w-9 h-9 rounded-lg shadow-xs object-contain group-hover:scale-105 transition-transform" 
+              />
               <div className="leading-tight">
                 <span className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap block">
                   ChequesPro

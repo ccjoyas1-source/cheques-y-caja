@@ -12,6 +12,7 @@ import {
   DollarSign,
   Wallet,
   Settings,
+  Pencil,
 } from 'lucide-react';
 
 interface TransfersViewProps {
@@ -26,6 +27,7 @@ interface TransfersViewProps {
   onOpenTransferModal: () => void;
   onOpenCashIncomeModal: () => void;
   onOpenInitialBalanceModal: () => void;
+  onEditTransfer?: (transfer: Transfer) => void;
   onDeleteTransfer?: (id: string) => void;
   onDeleteCashIncome?: (id: string) => void;
   currentUser: UserRole;
@@ -43,6 +45,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   onOpenTransferModal,
   onOpenCashIncomeModal,
   onOpenInitialBalanceModal,
+  onEditTransfer,
   onDeleteTransfer,
   onDeleteCashIncome,
   currentUser,
@@ -203,7 +206,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       <th className="py-3 px-4 text-right">Monto (USD)</th>
                       <th className="py-3 px-4">Autorizado Por</th>
                       <th className="py-3 px-4">Concepto</th>
-                      {onDeleteTransfer && <th className="py-3 px-4 text-right">Acción</th>}
+                      {(onEditTransfer || onDeleteTransfer) && (
+                        <th className="py-3 px-4 text-right">Acciones</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
@@ -237,19 +242,38 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                         <td className="py-3 px-4 text-slate-500 max-w-xs truncate">
                           {t.notes || '-'}
                         </td>
-                        {onDeleteTransfer && (
+                        {(onEditTransfer || onDeleteTransfer) && (
                           <td className="py-3 px-4 text-right">
-                            <button
-                              onClick={() => {
-                                if (window.confirm('¿Deseas revertir este egreso y devolver el monto al saldo en efectivo?')) {
-                                  onDeleteTransfer(t.id);
-                                }
-                              }}
-                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
-                              title="Revertir egreso"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              {onEditTransfer && (
+                                <button
+                                  onClick={() => onEditTransfer(t)}
+                                  className="p-1.5 text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Editar egreso o transferencia"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {onDeleteTransfer && (
+                                <button
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        `¿Deseas revertir este egreso (${t.referenceNumber} por ${formatCurrency(
+                                          t.amount
+                                        )}) y devolver el valor a caja?`
+                                      )
+                                    ) {
+                                      onDeleteTransfer(t.id);
+                                    }
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Revertir egreso"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>
