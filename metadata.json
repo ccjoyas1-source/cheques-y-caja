@@ -1,0 +1,6 @@
+{
+  "name": "ChequesPro - Registro de Cheques Postfechados",
+  "description": "Sistema de gestión y alertas de cheques postfechados, consolidación de efectivo por cobrar y transferencias a cuentas bancarias.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
