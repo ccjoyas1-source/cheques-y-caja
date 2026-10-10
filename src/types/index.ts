@@ -46,6 +46,7 @@ export interface CashIncome {
   notes?: string;
   receivedBy: UserRole;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface InitialBalanceConfig {

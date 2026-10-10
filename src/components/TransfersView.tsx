@@ -29,6 +29,7 @@ interface TransfersViewProps {
   onOpenInitialBalanceModal: () => void;
   onEditTransfer?: (transfer: Transfer) => void;
   onDeleteTransfer?: (id: string) => void;
+  onEditCashIncome?: (income: CashIncome) => void;
   onDeleteCashIncome?: (id: string) => void;
   currentUser: UserRole;
 }
@@ -47,6 +48,7 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
   onOpenInitialBalanceModal,
   onEditTransfer,
   onDeleteTransfer,
+  onEditCashIncome,
   onDeleteCashIncome,
   currentUser,
 }) => {
@@ -302,7 +304,9 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                       <th className="py-3 px-4 text-right">Monto (USD)</th>
                       <th className="py-3 px-4">Recibido Por</th>
                       <th className="py-3 px-4">Concepto / Detalle</th>
-                      {onDeleteCashIncome && <th className="py-3 px-4 text-right">Acción</th>}
+                      {(onEditCashIncome || onDeleteCashIncome) && (
+                        <th className="py-3 px-4 text-right">Acciones</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
@@ -330,19 +334,32 @@ export const TransfersView: React.FC<TransfersViewProps> = ({
                         <td className="py-3 px-4 text-slate-500 max-w-xs truncate">
                           {inc.notes || '-'}
                         </td>
-                        {onDeleteCashIncome && (
+                        {(onEditCashIncome || onDeleteCashIncome) && (
                           <td className="py-3 px-4 text-right">
-                            <button
-                              onClick={() => {
-                                if (window.confirm('¿Deseas eliminar este registro de ingreso en efectivo?')) {
-                                  onDeleteCashIncome(inc.id);
-                                }
-                              }}
-                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
-                              title="Eliminar ingreso"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              {onEditCashIncome && (
+                                <button
+                                  onClick={() => onEditCashIncome(inc)}
+                                  className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                  title="Editar ingreso en efectivo"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-slate-600" />
+                                </button>
+                              )}
+                              {onDeleteCashIncome && (
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm('¿Deseas eliminar este registro de ingreso en efectivo?')) {
+                                      onDeleteCashIncome(inc.id);
+                                    }
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Eliminar ingreso"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         )}
                       </tr>

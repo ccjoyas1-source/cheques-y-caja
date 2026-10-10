@@ -7,13 +7,22 @@ import {
   INITIAL_BALANCE_CONFIG,
 } from '../utils/initialData';
 
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   CHECKS: 'chequespro_v3_checks_fresh',
   CLIENTS: 'chequespro_v3_clients_fresh',
   TRANSFERS: 'chequespro_v3_transfers_fresh',
   CASH_INCOMES: 'chequespro_v3_cash_incomes_fresh',
   INITIAL_BALANCE: 'chequespro_v3_initial_balance_fresh',
   CURRENT_USER: 'chequespro_v3_current_user_fresh',
+  SYNC_TIMESTAMP: 'chequespro_v3_sync_timestamp',
+};
+
+export const broadcastLocalChange = () => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SYNC_TIMESTAMP, Date.now().toString());
+  } catch (e) {
+    // ignore
+  }
 };
 
 // Clean any previous version leftovers

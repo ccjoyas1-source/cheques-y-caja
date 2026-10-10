@@ -2,14 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { Client, UserRole, CashIncome } from '../types';
 import { formatCurrency, getTodayDateString } from '../utils/dateUtils';
 import { canonicalizeClientName } from '../utils/clientUtils';
-import { X, DollarSign, User, UserPlus, CheckCircle2 } from 'lucide-react';
+import { X, DollarSign, User, CheckCircle2, Pencil } from 'lucide-react';
 
 interface CashIncomeModalProps {
   isOpen: boolean;
   onClose: () => void;
   clients: Client[];
   currentUser: UserRole;
-  onSaveCashIncome: (incomeData: Omit<CashIncome, 'id' | 'createdAt'>, newClientName?: string) => void;
+  onSaveCashIncome: (
+    incomeData: Omit<CashIncome, 'id' | 'createdAt'>,
+    newClientName?: string,
+    incomeId?: string
+  ) => void;
+  editingIncome?: CashIncome | null;
 }
 
 export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
@@ -18,6 +23,7 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
   clients,
   currentUser,
   onSaveCashIncome,
+  editingIncome,
 }) => {
   const [clientName, setClientName] = useState('');
   const [isNewClient, setIsNewClient] = useState(false);
@@ -28,18 +34,31 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
   const [receivedBy, setReceivedBy] = useState<UserRole>(currentUser);
   const [error, setError] = useState('');
 
+  const isEditing = Boolean(editingIncome);
+
   useEffect(() => {
     if (isOpen) {
-      setClientName(clients[0]?.name || '');
-      setIsNewClient(clients.length === 0);
-      setNewClientName('');
-      setAmount('');
-      setDate(getTodayDateString());
-      setNotes('');
-      setReceivedBy(currentUser);
-      setError('');
+      if (editingIncome) {
+        setClientName(editingIncome.clientName);
+        setIsNewClient(false);
+        setNewClientName('');
+        setAmount(editingIncome.amount.toString());
+        setDate(editingIncome.date);
+        setNotes(editingIncome.notes || '');
+        setReceivedBy(editingIncome.receivedBy);
+        setError('');
+      } else {
+        setClientName(clients[0]?.name || '');
+        setIsNewClient(clients.length === 0);
+        setNewClientName('');
+        setAmount('');
+        setDate(getTodayDateString());
+        setNotes('');
+        setReceivedBy(currentUser);
+        setError('');
+      }
     }
-  }, [isOpen, currentUser, clients]);
+  }, [isOpen, currentUser, clients, editingIncome]);
 
   if (!isOpen) return null;
 
@@ -50,7 +69,7 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
     const rawClient = isNewClient ? newClientName.trim() : clientName.trim();
     const finalClient = canonicalizeClientName(rawClient);
     if (!finalClient) {
-      setError('Por favor indica el cliente o concepto del ingreso.');
+      setError('Por favor indica el cliente o procedencia del ingreso.');
       return;
     }
 
@@ -68,7 +87,8 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
         notes: notes.trim() || undefined,
         receivedBy,
       },
-      isNewClient ? finalClient : undefined
+      isNewClient ? finalClient : undefined,
+      editingIncome?.id
     );
 
     onClose();
@@ -84,14 +104,14 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-emerald-50/60">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-lg bg-emerald-100 text-emerald-800">
-              <DollarSign className="w-5 h-5" />
+              {isEditing ? <Pencil className="w-5 h-5" /> : <DollarSign className="w-5 h-5" />}
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                Registrar Ingreso en Efectivo
+                {isEditing ? 'Editar Ingreso en Efectivo' : 'Registrar Ingreso en Efectivo'}
               </h3>
               <p className="text-xs text-slate-500">
-                Suma directamente al saldo en efectivo disponible
+                {isEditing ? 'Modifica los valores del cobro en efectivo' : 'Suma directamente al saldo en efectivo disponible'}
               </p>
             </div>
           </div>
@@ -138,7 +158,7 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
                 onChange={(e) => setNewClientName(e.target.value)}
                 placeholder="Ej. Sofía Valdivieso, Venta Mostrador..."
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white"
-                autoFocus
+                autoFocus={!isEditing}
                 required
               />
             ) : (
@@ -152,6 +172,9 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
                     {c.name}
                   </option>
                 ))}
+                {clientName && !clients.some((c) => c.name === clientName) && (
+                  <option value={clientName}>{clientName}</option>
+                )}
               </select>
             )}
           </div>
@@ -235,7 +258,7 @@ export const CashIncomeModal: React.FC<CashIncomeModalProps> = ({
               className="px-5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs transition-colors inline-flex items-center gap-1.5 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Guardar Ingreso en Efectivo</span>
+              <span>{isEditing ? 'Guardar Cambios' : 'Guardar Ingreso en Efectivo'}</span>
             </button>
           </div>
 

@@ -23,6 +23,7 @@ import {
   saveStoredUser,
   exportToCSV,
   clearAllDataToZero,
+  broadcastLocalChange,
 } from './services/storageService';
 import {
   getTodayDateString,
@@ -52,8 +53,18 @@ import { TransfersView } from './components/TransfersView';
 import { ImportExcelModal } from './components/ImportExcelModal';
 import { CashIncomeModal } from './components/CashIncomeModal';
 import { InitialBalanceModal } from './components/InitialBalanceModal';
+import { BackupModal } from './components/BackupModal';
+import {
+  AppBackupPayload,
+  isMonthlyBackupDue,
+  getStoredBackupMeta,
+  saveStoredBackupMeta,
+  buildBackupPayload,
+  downloadBackupFile,
+  sendBackupViaEmailClient,
+} from './services/backupService';
 import { generateSampleExcelTemplate } from './utils/excelImport';
-import { Trash2, FileSpreadsheet, Plus, Download, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Trash2, FileSpreadsheet, Plus, Download, Sparkles, CheckCircle2, Shield } from 'lucide-react';
 
 export default function App() {
   // Master state with automatic canonicalization
@@ -115,32 +126,75 @@ export default function App() {
   const [isClientsModalOpen, setIsClientsModalOpen] = useState(false);
   const [isImportExcelModalOpen, setIsImportExcelModalOpen] = useState(false);
   const [isCashIncomeModalOpen, setIsCashIncomeModalOpen] = useState(false);
+  const [editingIncome, setEditingIncome] = useState<CashIncome | null>(null);
   const [isInitialBalanceModalOpen, setIsInitialBalanceModalOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [monthlyBackupNotice, setMonthlyBackupNotice] = useState<boolean>(false);
 
-  // Sync to localStorage
+  // Sync to localStorage and broadcast to other open tabs / windows
   useEffect(() => {
     saveStoredChecks(checks);
+    broadcastLocalChange();
   }, [checks]);
 
   useEffect(() => {
     saveStoredClients(clients);
+    broadcastLocalChange();
   }, [clients]);
 
   useEffect(() => {
     saveStoredTransfers(transfers);
+    broadcastLocalChange();
   }, [transfers]);
 
   useEffect(() => {
     saveStoredCashIncomes(cashIncomes);
+    broadcastLocalChange();
   }, [cashIncomes]);
 
   useEffect(() => {
     saveStoredInitialBalance(initialBalance);
+    broadcastLocalChange();
   }, [initialBalance]);
 
   useEffect(() => {
     saveStoredUser(currentUser);
   }, [currentUser]);
+
+  // Real-time synchronization across accounts/tabs: When María or Cristian makes a change, sync to other open views immediately
+  useEffect(() => {
+    const handleStorageSync = (e: StorageEvent) => {
+      // Reload states from updated localStorage
+      const newChecks = getStoredChecks().map((c) => {
+        const canonicalClient = canonicalizeClientName(c.clientName);
+        const updated = { ...c, clientName: canonicalClient };
+        return { ...updated, status: resolveCheckStatus(updated) };
+      });
+      setChecks(newChecks);
+
+      const rawClients = getStoredClients();
+      const res = autoUnifyKnownAliases([], [], rawClients);
+      setClients(res.updatedClients.map((c) => ({ ...c, name: canonicalizeClientName(c.name) })));
+
+      setTransfers(getStoredTransfers());
+
+      const rawIncomes = getStoredCashIncomes();
+      setCashIncomes(rawIncomes.map((inc) => ({ ...inc, clientName: canonicalizeClientName(inc.clientName) })));
+
+      setInitialBalance(getStoredInitialBalance());
+    };
+
+    window.addEventListener('storage', handleStorageSync);
+    return () => window.removeEventListener('storage', handleStorageSync);
+  }, []);
+
+  // Check if monthly backup is due (end of month)
+  useEffect(() => {
+    const meta = getStoredBackupMeta();
+    if (isMonthlyBackupDue(meta)) {
+      setMonthlyBackupNotice(true);
+    }
+  }, []);
 
   // Auto-unify known aliases (andrea Dias -> Andrea diaz, lola ponton -> MAGDALENA PONTON) on mount
   useEffect(() => {
@@ -440,7 +494,8 @@ export default function App() {
   // Cash Incomes
   const handleSaveCashIncome = (
     incomeData: Omit<CashIncome, 'id' | 'createdAt'>,
-    newClientName?: string
+    newClientName?: string,
+    incomeId?: string
   ) => {
     const canonicalClient = canonicalizeClientName(incomeData.clientName);
     const canonicalNewClient = newClientName ? canonicalizeClientName(newClientName) : undefined;
@@ -457,13 +512,29 @@ export default function App() {
       }
     }
 
-    const newIncome: CashIncome = {
-      ...incomeData,
-      clientName: canonicalClient,
-      id: `inc-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    setCashIncomes((prev) => [newIncome, ...prev]);
+    if (incomeId) {
+      setCashIncomes((prev) =>
+        prev.map((item) =>
+          item.id === incomeId
+            ? {
+                ...item,
+                ...incomeData,
+                clientName: canonicalClient,
+                updatedAt: new Date().toISOString(),
+              }
+            : item
+        )
+      );
+    } else {
+      const newIncome: CashIncome = {
+        ...incomeData,
+        clientName: canonicalClient,
+        id: `inc-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      };
+      setCashIncomes((prev) => [newIncome, ...prev]);
+    }
+    setEditingIncome(null);
   };
 
   const handleDeleteCashIncome = (id: string) => {
@@ -596,11 +667,15 @@ export default function App() {
           setEditingTransfer(null);
           setIsTransferModalOpen(true);
         }}
-        onOpenCashIncomeModal={() => setIsCashIncomeModalOpen(true)}
+        onOpenCashIncomeModal={() => {
+          setEditingIncome(null);
+          setIsCashIncomeModalOpen(true);
+        }}
         onOpenInitialBalanceModal={() => setIsInitialBalanceModalOpen(true)}
         onOpenClientsModal={() => setIsClientsModalOpen(true)}
         onOpenTransfersHistory={() => setActiveTab('transfers')}
         onOpenImportExcel={() => setIsImportExcelModalOpen(true)}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
       />
@@ -608,6 +683,39 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         
+        {/* Monthly Backup Reminder Banner */}
+        {monthlyBackupNotice && (
+          <div className="mb-6 p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-500 text-white rounded-lg shadow-xs">
+                <Shield className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold text-slate-900">
+                  Respaldo Mensual Requerido (Fin de Mes)
+                </h4>
+                <p className="text-xs text-slate-600">
+                  Es momento de generar el respaldo mensual y enviarlo automáticamente a <strong>ccjoyas1@gmail.com</strong> para salvaguardar todos los cheques y movimientos.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setIsBackupModalOpen(true)}
+                className="px-3.5 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                Crear Respaldo Ahora
+              </button>
+              <button
+                onClick={() => setMonthlyBackupNotice(false)}
+                className="px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Urgent Alerts */}
         <UrgentAlertBanner
           checks={checks}
@@ -681,7 +789,10 @@ export default function App() {
                 setEditingTransfer(null);
                 setIsTransferModalOpen(true);
               }}
-              onOpenCashIncomeModal={() => setIsCashIncomeModalOpen(true)}
+              onOpenCashIncomeModal={() => {
+                setEditingIncome(null);
+                setIsCashIncomeModalOpen(true);
+              }}
               onOpenInitialBalanceModal={() => setIsInitialBalanceModalOpen(true)}
               onFilterDueThisWeek={() => handleFilterChange({ status: 'due_this_week' })}
               onFilterBounced={() => handleFilterChange({ status: 'bounced' })}
@@ -735,13 +846,20 @@ export default function App() {
               setEditingTransfer(null);
               setIsTransferModalOpen(true);
             }}
-            onOpenCashIncomeModal={() => setIsCashIncomeModalOpen(true)}
+            onOpenCashIncomeModal={() => {
+              setEditingIncome(null);
+              setIsCashIncomeModalOpen(true);
+            }}
             onOpenInitialBalanceModal={() => setIsInitialBalanceModalOpen(true)}
             onEditTransfer={(transfer) => {
               setEditingTransfer(transfer);
               setIsTransferModalOpen(true);
             }}
             onDeleteTransfer={handleDeleteTransfer}
+            onEditCashIncome={(income) => {
+              setEditingIncome(income);
+              setIsCashIncomeModalOpen(true);
+            }}
             onDeleteCashIncome={handleDeleteCashIncome}
             currentUser={currentUser}
           />
@@ -773,6 +891,15 @@ export default function App() {
               <span>Importar Excel</span>
             </button>
             <span aria-hidden="true">·</span>
+            <button
+              onClick={() => setIsBackupModalOpen(true)}
+              className="text-amber-700 hover:text-amber-900 transition-colors inline-flex items-center gap-1 cursor-pointer font-medium"
+              title="Respaldo automático mensual para ccjoyas1@gmail.com"
+            >
+              <Shield className="w-3.5 h-3.5 text-amber-600" />
+              <span>Respaldos (ccjoyas1@gmail.com)</span>
+            </button>
+            <span aria-hidden="true">·</span>
             <span>Fecha: {getTodayDateString()}</span>
           </div>
         </div>
@@ -794,10 +921,14 @@ export default function App() {
 
       <CashIncomeModal
         isOpen={isCashIncomeModalOpen}
-        onClose={() => setIsCashIncomeModalOpen(false)}
+        onClose={() => {
+          setIsCashIncomeModalOpen(false);
+          setEditingIncome(null);
+        }}
         clients={clients}
         currentUser={currentUser}
         onSaveCashIncome={handleSaveCashIncome}
+        editingIncome={editingIncome}
       />
 
       <InitialBalanceModal
@@ -858,6 +989,26 @@ export default function App() {
         existingClients={clients}
         currentUser={currentUser}
         onImportComplete={handleImportComplete}
+      />
+
+      <BackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        data={{
+          checks,
+          clients,
+          transfers,
+          cashIncomes,
+          initialBalance,
+          currentUser,
+        }}
+        onRestoreData={(backup) => {
+          setChecks(backup.data.checks);
+          setClients(backup.data.clients);
+          setTransfers(backup.data.transfers);
+          setCashIncomes(backup.data.cashIncomes);
+          setInitialBalance(backup.data.initialBalance);
+        }}
       />
 
     </div>

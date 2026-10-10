@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserRole } from '../types';
-import { Plus, Users, ArrowRightLeft, ShieldCheck, UserCheck, DollarSign } from 'lucide-react';
+import { Plus, Users, ArrowRightLeft, ShieldCheck, UserCheck, DollarSign, Shield } from 'lucide-react';
 
 interface HeaderProps {
   currentUser: UserRole;
@@ -12,6 +12,7 @@ interface HeaderProps {
   onOpenClientsModal: () => void;
   onOpenTransfersHistory: () => void;
   onOpenImportExcel?: () => void;
+  onOpenBackupModal?: () => void;
   activeTab: 'dashboard' | 'transfers';
   setActiveTab: (tab: 'dashboard' | 'transfers') => void;
 }
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTransferModal,
   onOpenCashIncomeModal,
   onOpenClientsModal,
+  onOpenBackupModal,
   activeTab,
   setActiveTab,
 }) => {
@@ -87,6 +89,16 @@ export const Header: React.FC<HeaderProps> = ({
               <Users className="w-4 h-4 text-slate-400" />
               <span>Clientes</span>
             </button>
+            {onOpenBackupModal && (
+              <button
+                onClick={onOpenBackupModal}
+                className="hover:text-amber-700 transition-colors whitespace-nowrap shrink-0 py-1 border-b-2 border-transparent text-slate-600 flex items-center gap-1.5 cursor-pointer"
+                title="Generar o restaurar respaldo mensual para ccjoyas1@gmail.com"
+              >
+                <Shield className="w-4 h-4 text-amber-500" />
+                <span>Respaldos</span>
+              </button>
+            )}
           </nav>
 
           {/* Zone 3: User Switcher & Actions */}
@@ -173,6 +185,15 @@ export const Header: React.FC<HeaderProps> = ({
               className="px-2 py-1 rounded text-emerald-700 font-bold hover:bg-emerald-50 cursor-pointer"
             >
               + Efectivo
+            </button>
+          )}
+          {onOpenBackupModal && (
+            <button
+              onClick={onOpenBackupModal}
+              className="px-2 py-1 rounded text-amber-700 font-bold hover:bg-amber-50 cursor-pointer"
+              title="Respaldos"
+            >
+              Respaldos
             </button>
           )}
         </div>
