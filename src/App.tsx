@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Check,
   Client,
@@ -24,7 +24,16 @@ import {
   exportToCSV,
   clearAllDataToZero,
   broadcastLocalChange,
+  wipeAllStorage,
 } from './services/storageService';
+import {
+  CollectionsData,
+  RemoteChange,
+  isDbConfigured,
+  markDeviceLinked,
+  signOut,
+} from './services/dbService';
+import { useCloudSync, SyncStatus } from './hooks/useCloudSync';
 import {
   getTodayDateString,
   getDaysDifference,
@@ -64,43 +73,63 @@ import {
   sendBackupViaEmailClient,
 } from './services/backupService';
 import { generateSampleExcelTemplate } from './utils/excelImport';
-import { Trash2, FileSpreadsheet, Plus, Download, Sparkles, CheckCircle2, Shield } from 'lucide-react';
+import { Trash2, FileSpreadsheet, Plus, Download, Sparkles, CheckCircle2, Shield, LogOut, Loader2 } from 'lucide-react';
+
+const INITIAL_BALANCE_ID = 'initial_balance';
+
+// IDs únicos aunque dos dispositivos creen registros en el mismo milisegundo
+const newId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+// Canonicalization applied to every record, whether it comes from localStorage or the database
+const normalizeCheck = (c: Check): Check => {
+  const updated = { ...c, clientName: canonicalizeClientName(c.clientName) };
+  return { ...updated, status: resolveCheckStatus(updated) };
+};
+
+const normalizeClient = (c: Client): Client => ({ ...c, name: canonicalizeClientName(c.name) });
+
+const normalizeClients = (raw: Client[]): Client[] =>
+  autoUnifyKnownAliases([], [], raw).updatedClients.map(normalizeClient);
+
+const normalizeIncome = (inc: CashIncome): CashIncome => ({
+  ...inc,
+  clientName: canonicalizeClientName(inc.clientName),
+});
+
+// Applies a change made on another device to one of the state lists
+const applyRemoteListChange = <T extends { id: string }>(
+  setter: React.Dispatch<React.SetStateAction<T[]>>,
+  change: RemoteChange,
+  normalize: (doc: T) => T = (doc) => doc
+) => {
+  if (change.type === 'delete') {
+    setter((prev) => prev.filter((x) => x.id !== change.id));
+    return;
+  }
+  const doc = normalize(change.data as unknown as T);
+  setter((prev) =>
+    prev.some((x) => x.id === doc.id) ? prev.map((x) => (x.id === doc.id ? doc : x)) : [doc, ...prev]
+  );
+};
+
+const SYNC_STATUS_UI: Record<SyncStatus, { label: string; dot: string }> = {
+  disabled: { label: 'Solo en este navegador', dot: 'bg-slate-400' },
+  connecting: { label: 'Conectando…', dot: 'bg-amber-400 animate-pulse' },
+  synced: { label: 'Sincronizado', dot: 'bg-emerald-500' },
+  saving: { label: 'Guardando…', dot: 'bg-sky-500 animate-pulse' },
+  offline: { label: 'Sin conexión · reintentando', dot: 'bg-amber-500' },
+  error: { label: 'Error al guardar · reintentando', dot: 'bg-rose-500' },
+};
 
 export default function App() {
   // Master state with automatic canonicalization
-  const [checks, setChecks] = useState<Check[]>(() => {
-    const raw = getStoredChecks();
-    return raw.map((c) => {
-      const canonicalClient = canonicalizeClientName(c.clientName);
-      const updated = {
-        ...c,
-        clientName: canonicalClient,
-      };
-      return {
-        ...updated,
-        status: resolveCheckStatus(updated),
-      };
-    });
-  });
+  const [checks, setChecks] = useState<Check[]>(() => getStoredChecks().map(normalizeCheck));
 
-  const [clients, setClients] = useState<Client[]>(() => {
-    const raw = getStoredClients();
-    const res = autoUnifyKnownAliases([], [], raw);
-    return res.updatedClients.map((c) => ({
-      ...c,
-      name: canonicalizeClientName(c.name),
-    }));
-  });
+  const [clients, setClients] = useState<Client[]>(() => normalizeClients(getStoredClients()));
 
   const [transfers, setTransfers] = useState<Transfer[]>(getStoredTransfers);
 
-  const [cashIncomes, setCashIncomes] = useState<CashIncome[]>(() => {
-    const raw = getStoredCashIncomes();
-    return raw.map((inc) => ({
-      ...inc,
-      clientName: canonicalizeClientName(inc.clientName),
-    }));
-  });
+  const [cashIncomes, setCashIncomes] = useState<CashIncome[]>(() => getStoredCashIncomes().map(normalizeIncome));
 
   const [initialBalance, setInitialBalance] = useState<InitialBalanceConfig>(getStoredInitialBalance);
   const [currentUser, setCurrentUser] = useState<UserRole>(getStoredUser);
@@ -161,32 +190,97 @@ export default function App() {
     saveStoredUser(currentUser);
   }, [currentUser]);
 
-  // Real-time synchronization across accounts/tabs: When María or Cristian makes a change, sync to other open views immediately
+  // Sync between tabs of this same browser (only without database: with it, realtime covers every device)
   useEffect(() => {
+    if (isDbConfigured) return;
     const handleStorageSync = (e: StorageEvent) => {
       // Reload states from updated localStorage
-      const newChecks = getStoredChecks().map((c) => {
-        const canonicalClient = canonicalizeClientName(c.clientName);
-        const updated = { ...c, clientName: canonicalClient };
-        return { ...updated, status: resolveCheckStatus(updated) };
-      });
-      setChecks(newChecks);
-
-      const rawClients = getStoredClients();
-      const res = autoUnifyKnownAliases([], [], rawClients);
-      setClients(res.updatedClients.map((c) => ({ ...c, name: canonicalizeClientName(c.name) })));
-
+      setChecks(getStoredChecks().map(normalizeCheck));
+      setClients(normalizeClients(getStoredClients()));
       setTransfers(getStoredTransfers());
-
-      const rawIncomes = getStoredCashIncomes();
-      setCashIncomes(rawIncomes.map((inc) => ({ ...inc, clientName: canonicalizeClientName(inc.clientName) })));
-
+      setCashIncomes(getStoredCashIncomes().map(normalizeIncome));
       setInitialBalance(getStoredInitialBalance());
     };
 
     window.addEventListener('storage', handleStorageSync);
     return () => window.removeEventListener('storage', handleStorageSync);
   }, []);
+
+  // Shared database: every change made by María or Cristian is saved and shows up on all devices in real time
+  const cloudData = useMemo<CollectionsData>(
+    () => ({
+      checks,
+      clients,
+      transfers,
+      cash_incomes: cashIncomes,
+      settings: [{ id: INITIAL_BALANCE_ID, ...initialBalance }],
+    }),
+    [checks, clients, transfers, cashIncomes, initialBalance]
+  );
+
+  const handleRemoteLoad = useCallback((remote: CollectionsData) => {
+    const res = autoUnifyKnownAliases(
+      (remote.checks as Check[]).map(normalizeCheck),
+      (remote.cash_incomes as CashIncome[]).map(normalizeIncome),
+      normalizeClients(remote.clients as Client[])
+    );
+    setChecks(res.updatedChecks);
+    setCashIncomes(res.updatedCashIncomes);
+    setClients(res.updatedClients);
+    setTransfers(remote.transfers as Transfer[]);
+    const balance = remote.settings.find((d) => d.id === INITIAL_BALANCE_ID);
+    if (balance) {
+      const { id, ...config } = balance as InitialBalanceConfig & { id: string };
+      setInitialBalance(config);
+    }
+  }, []);
+
+  const handleRemoteChange = useCallback((change: RemoteChange) => {
+    switch (change.collection) {
+      case 'checks':
+        applyRemoteListChange(setChecks, change, normalizeCheck);
+        break;
+      case 'clients':
+        applyRemoteListChange(setClients, change, normalizeClient);
+        break;
+      case 'transfers':
+        applyRemoteListChange(setTransfers, change);
+        break;
+      case 'cash_incomes':
+        applyRemoteListChange(setCashIncomes, change, normalizeIncome);
+        break;
+      case 'settings':
+        if (change.type === 'upsert' && change.id === INITIAL_BALANCE_ID) {
+          const { id, ...config } = change.data as InitialBalanceConfig & { id: string };
+          setInitialBalance(config);
+        }
+        break;
+    }
+  }, []);
+
+  const cloudSync = useCloudSync({
+    data: cloudData,
+    onRemoteLoad: handleRemoteLoad,
+    onRemoteChange: handleRemoteChange,
+    confirmUploadLocal: (count) =>
+      window.confirm(
+        `Este navegador tiene ${count} registro(s) guardados localmente que no están en la base de datos compartida.\n\n` +
+          '¿Deseas subirlos para que se vean en todos los dispositivos?\n\n' +
+          'Aceptar = subirlos · Cancelar = descartarlos y usar solo los datos de la nube'
+      ),
+  });
+
+  const handleSignOut = async () => {
+    if (
+      cloudSync.hasPendingChanges() &&
+      !window.confirm('Hay cambios que aún no se guardaron en la base de datos. Si cierras sesión se perderán. ¿Continuar?')
+    ) {
+      return;
+    }
+    await signOut();
+    wipeAllStorage();
+    markDeviceLinked(false);
+  };
 
   // Check if monthly backup is due (end of month)
   useEffect(() => {
@@ -395,7 +489,7 @@ export default function App() {
       const exists = clients.some((c) => c.name.toLowerCase() === canonicalNewClient.toLowerCase());
       if (!exists) {
         const newClient: Client = {
-          id: `cli-${Date.now()}`,
+          id: newId('cli'),
           name: canonicalNewClient,
           createdAt: getTodayDateString(),
         };
@@ -424,7 +518,7 @@ export default function App() {
       setEditingCheck(null);
     } else {
       const newCheck: Check = {
-        id: `chk-${Date.now()}`,
+        id: newId('chk'),
         checkNumber: checkData.checkNumber || `CH-${Math.floor(100000 + Math.random() * 900000)}`,
         clientName: canonicalClient,
         amount: checkData.amount || 0,
@@ -504,7 +598,7 @@ export default function App() {
       const exists = clients.some((c) => c.name.toLowerCase() === canonicalNewClient.toLowerCase());
       if (!exists) {
         const newClient: Client = {
-          id: `cli-${Date.now()}`,
+          id: newId('cli'),
           name: canonicalNewClient,
           createdAt: getTodayDateString(),
         };
@@ -529,7 +623,7 @@ export default function App() {
       const newIncome: CashIncome = {
         ...incomeData,
         clientName: canonicalClient,
-        id: `inc-${Date.now()}`,
+        id: newId('inc'),
         createdAt: new Date().toISOString(),
       };
       setCashIncomes((prev) => [newIncome, ...prev]);
@@ -566,7 +660,7 @@ export default function App() {
     } else {
       const newTransfer: Transfer = {
         ...transferData,
-        id: `trf-${Date.now()}`,
+        id: newId('trf'),
         createdAt: new Date().toISOString(),
       };
       setTransfers((prev) => [newTransfer, ...prev]);
@@ -591,7 +685,7 @@ export default function App() {
     const newClient: Client = {
       ...clientData,
       name: cleanName,
-      id: `cli-${Date.now()}`,
+      id: newId('cli'),
       createdAt: getTodayDateString(),
     };
     setClients((prev) => [newClient, ...prev]);
@@ -635,7 +729,9 @@ export default function App() {
   const handleClearAllData = () => {
     if (
       window.confirm(
-        '¿Deseas limpiar todos los datos para iniciar en limpio (0 cheques, 0 clientes, 0 movimientos)?'
+        isDbConfigured
+          ? '¿Deseas limpiar todos los datos para iniciar en limpio (0 cheques, 0 clientes, 0 movimientos)?\n\nATENCIÓN: se borrarán de la base de datos compartida, para todos los usuarios y dispositivos.'
+          : '¿Deseas limpiar todos los datos para iniciar en limpio (0 cheques, 0 clientes, 0 movimientos)?'
       )
     ) {
       clearAllDataToZero();
@@ -652,9 +748,24 @@ export default function App() {
     }
   };
 
+  // Until the shared data is downloaded, don't allow edits that would be overwritten
+  if (isDbConfigured && !cloudSync.hydrated) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3 font-sans">
+        <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+        <p className="text-sm font-medium text-slate-600">Cargando datos compartidos…</p>
+        {(cloudSync.status === 'error' || cloudSync.status === 'offline') && (
+          <p className="text-xs text-rose-600">
+            No se pudo conectar con la base de datos. Reintentando automáticamente…
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      
+
       {/* Top Bar Header */}
       <Header
         currentUser={currentUser}
@@ -870,8 +981,15 @@ export default function App() {
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-4 mt-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
-          <div>
+          <div className="flex items-center gap-3">
             <span>ChequesPro · Sistema para Cristian y María</span>
+            <span
+              className="inline-flex items-center gap-1.5 font-medium text-slate-600"
+              title={isDbConfigured ? 'Estado de la base de datos compartida' : 'Configura Supabase para compartir los datos'}
+            >
+              <span className={`w-2 h-2 rounded-full ${SYNC_STATUS_UI[cloudSync.status].dot}`} />
+              {SYNC_STATUS_UI[cloudSync.status].label}
+            </span>
           </div>
           <div className="flex items-center gap-4">
             <button
@@ -901,6 +1019,18 @@ export default function App() {
             </button>
             <span aria-hidden="true">·</span>
             <span>Fecha: {getTodayDateString()}</span>
+            {isDbConfigured && (
+              <>
+                <span aria-hidden="true">·</span>
+                <button
+                  onClick={handleSignOut}
+                  className="hover:text-slate-800 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Cerrar sesión</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </footer>
